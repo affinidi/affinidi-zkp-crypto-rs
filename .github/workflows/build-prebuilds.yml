@@ -1,0 +1,272 @@
+name: Build native prebuilds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - ".github/workflows/build-prebuilds.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rust-native-prebuilds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      source_fingerprint: ${{ steps.fp.outputs.source_fingerprint }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute source fingerprint
+        id: fp
+        run: |
+          python3 - > /tmp/source_fingerprint.txt <<'PY'
+          import hashlib, os
+          files=[]
+          for root, _, names in os.walk("src"):
+              for n in names:
+                  files.append(os.path.join(root, n))
+          for extra in ("Cargo.toml","Cargo.lock"):
+              if os.path.isfile(extra):
+                  files.append(extra)
+          h=hashlib.sha256()
+          for p in sorted(set(files)):
+              with open(p,"rb") as f:
+                  data=f.read()
+              h.update(p.encode("utf-8")); h.update(b"\0"); h.update(hashlib.sha256(data).digest())
+          print(h.hexdigest())
+          PY
+          FINGERPRINT="$(cat /tmp/source_fingerprint.txt)"
+          echo "source_fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+          echo "Source fingerprint: $FINGERPRINT"
+
+  apple:
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust targets
+        run: |
+          rustup target add \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            aarch64-apple-ios \
+            aarch64-apple-ios-sim \
+            x86_64-apple-ios
+
+      - name: Build Apple slices
+        run: |
+          mkdir -p dist/prebuilds dist/release-assets
+          for triple in \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            aarch64-apple-ios \
+            aarch64-apple-ios-sim \
+            x86_64-apple-ios; do
+            CARGO_PROFILE_RELEASE_DEBUG=line-tables-only \
+            CARGO_PROFILE_RELEASE_STRIP=none \
+            CARGO_PROFILE_RELEASE_LTO=thin \
+            cargo build --release --target "$triple"
+            lib="librust_eddsa_helper.dylib"
+            built="target/$triple/release/$lib"
+            if [[ ! -f "$built" ]]; then
+              built="target/$triple/ios/$lib"
+            fi
+            mkdir -p "dist/prebuilds/$triple"
+            cp "$built" "dist/prebuilds/$triple/$lib"
+            cp "$built" "dist/release-assets/rust_eddsa_helper-${triple}.dylib"
+            tmp="$(mktemp -d)"
+            xcrun dsymutil "$built" -o "$tmp/${lib}.dSYM"
+            (cd "$tmp" && zip -r -q "rust_eddsa_helper-${triple}.dSYM.zip" "${lib}.dSYM")
+            cp "$tmp/rust_eddsa_helper-${triple}.dSYM.zip" "dist/prebuilds/$triple/"
+            cp "$tmp/rust_eddsa_helper-${triple}.dSYM.zip" "dist/release-assets/"
+          done
+
+      - name: Upload Apple artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-apple
+          path: |
+            dist/prebuilds/**
+            dist/release-assets/**
+          if-no-files-found: error
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Android slices in Docker
+        run: |
+          cat > android-prebuild.Dockerfile <<'EOF'
+          FROM rust:1.85-bookworm
+          ARG ANDROID_NDK_VERSION=r26d
+          RUN apt-get update \
+            && apt-get install -y --no-install-recommends zip unzip ca-certificates \
+            && curl -fsSL -o /tmp/ndk.zip "https://dl.google.com/android/repository/android-ndk-${ANDROID_NDK_VERSION}-linux.zip" \
+            && unzip -q /tmp/ndk.zip -d /opt \
+            && rm /tmp/ndk.zip \
+            && mv /opt/android-ndk-* /opt/android-ndk
+          ENV ANDROID_NDK_ROOT=/opt/android-ndk
+          RUN rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android \
+            i686-linux-android
+          EOF
+          docker build -f android-prebuild.Dockerfile -t affinidi-zkp-crypto-rs-android-prebuild .
+          docker run --rm \
+            -e ANDROID_API_LEVEL=24 \
+            -v "$PWD:/work" \
+            -w /work \
+            affinidi-zkp-crypto-rs-android-prebuild \
+            bash -c '
+              set -euo pipefail
+              NDK="$ANDROID_NDK_ROOT"
+              BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+              export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
+              export CARGO_PROFILE_RELEASE_STRIP=none
+              export CARGO_PROFILE_RELEASE_LTO=thin
+              export CC_aarch64_linux_android="$BIN/aarch64-linux-android24-clang"
+              export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+              export AR_aarch64_linux_android="$BIN/llvm-ar"
+              export CFLAGS_aarch64_linux_android="-D__ANDROID_API__=24"
+              export CC_armv7_linux_androideabi="$BIN/armv7a-linux-androideabi24-clang"
+              export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$CC_armv7_linux_androideabi"
+              export AR_armv7_linux_androideabi="$BIN/llvm-ar"
+              export CFLAGS_armv7_linux_androideabi="-D__ANDROID_API__=24"
+              export CC_x86_64_linux_android="$BIN/x86_64-linux-android24-clang"
+              export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$CC_x86_64_linux_android"
+              export AR_x86_64_linux_android="$BIN/llvm-ar"
+              export CFLAGS_x86_64_linux_android="-D__ANDROID_API__=24"
+              export CC_i686_linux_android="$BIN/i686-linux-android24-clang"
+              export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$CC_i686_linux_android"
+              export AR_i686_linux_android="$BIN/llvm-ar"
+              export CFLAGS_i686_linux_android="-D__ANDROID_API__=24"
+              mkdir -p dist/prebuilds dist/release-assets
+              for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android; do
+                cargo build --release --target "$triple"
+                rel="target/$triple/release"
+                mkdir -p "dist/prebuilds/$triple"
+                cp "$rel/librust_eddsa_helper.so" "dist/prebuilds/$triple/librust_eddsa_helper.so"
+                cp "$rel/librust_eddsa_helper.so" "dist/release-assets/rust_eddsa_helper-${triple}.so"
+                ( cd "$rel" && "$BIN/llvm-objcopy" --only-keep-debug librust_eddsa_helper.so librust_eddsa_helper.so.debug \
+                  && zip -q "rust_eddsa_helper-${triple}.so.debug.zip" librust_eddsa_helper.so.debug && rm -f librust_eddsa_helper.so.debug )
+                cp "$rel/rust_eddsa_helper-${triple}.so.debug.zip" "dist/prebuilds/$triple/"
+                cp "$rel/rust_eddsa_helper-${triple}.so.debug.zip" "dist/release-assets/"
+              done
+            '
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-android
+          path: |
+            dist/prebuilds/**
+            dist/release-assets/**
+          if-no-files-found: error
+
+  publish-release:
+    needs:
+      - prepare
+      - apple
+      - android
+    runs-on: ubuntu-24.04
+    env:
+      SOURCE_FINGERPRINT: ${{ needs.prepare.outputs.source_fingerprint }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Apple artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-apple
+          path: dist/apple
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-android
+          path: dist/android
+      - name: Normalize prebuild directory
+        run: |
+          mkdir -p dist/prebuilds dist/release-assets
+          find dist/apple dist/android -type f -name 'librust_eddsa_helper.*' | while read -r f; do
+            triple="$(basename "$(dirname "$f")")"
+            name="$(basename "$f")"
+            ext="${name##*.}"
+            mkdir -p "dist/prebuilds/$triple"
+            cp "$f" "dist/prebuilds/$triple/$name"
+            cp "$f" "dist/release-assets/rust_eddsa_helper-${triple}.${ext}"
+          done
+          find dist/apple dist/android -type f \( -name 'rust_eddsa_helper-*.dSYM.zip' -o -name 'rust_eddsa_helper-*.so.debug.zip' \) | while read -r f; do
+            triple="$(basename "$(dirname "$f")")"
+            b="$(basename "$f")"
+            mkdir -p "dist/prebuilds/$triple"
+            cp "$f" "dist/prebuilds/$triple/$b"
+            cp "$f" "dist/release-assets/$b"
+          done
+      - name: Create GitHub release and upload assets
+        run: |
+          TAG="prebuilds-${SOURCE_FINGERPRINT}"
+          gh release view "$TAG" >/dev/null 2>&1 && gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" \
+            --title "Native prebuilds $SOURCE_FINGERPRINT" \
+            --notes "Automated native prebuilds for Rust source fingerprint $SOURCE_FINGERPRINT. Includes dylib/.so, Apple dSYM zips, and Android split-debug zips."
+          gh release upload "$TAG" dist/release-assets/* --clobber
+      - name: Generate manifest and fingerprint artifacts
+        run: |
+          TAG="prebuilds-${SOURCE_FINGERPRINT}"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          python3 - "$BASE_URL" "$SOURCE_FINGERPRINT" <<'PY'
+          import hashlib, json, os, sys
+          base_url, fp = sys.argv[1], sys.argv[2]
+          assets_root = "dist/prebuilds"
+          entries = {}
+          for triple in sorted(os.listdir(assets_root)):
+            td = os.path.join(assets_root, triple)
+            if not os.path.isdir(td):
+              continue
+            lib = None
+            for name in ("librust_eddsa_helper.dylib", "librust_eddsa_helper.so"):
+              p = os.path.join(td, name)
+              if os.path.isfile(p):
+                lib = p
+                break
+            if lib is None:
+              continue
+            with open(lib, "rb") as f:
+              sha = hashlib.sha256(f.read()).hexdigest()
+            ext = "dylib" if lib.endswith(".dylib") else "so"
+            entry = {"sha256": sha, "url": f"{base_url}/rust_eddsa_helper-{triple}.{ext}"}
+            dsym = os.path.join(td, f"rust_eddsa_helper-{triple}.dSYM.zip")
+            dbg = os.path.join(td, f"rust_eddsa_helper-{triple}.so.debug.zip")
+            if os.path.isfile(dsym):
+              with open(dsym, "rb") as f:
+                ssha = hashlib.sha256(f.read()).hexdigest()
+              entry["symbols"] = {"kind": "dsym", "sha256": ssha, "url": f"{base_url}/rust_eddsa_helper-{triple}.dSYM.zip"}
+            elif os.path.isfile(dbg):
+              with open(dbg, "rb") as f:
+                ssha = hashlib.sha256(f.read()).hexdigest()
+              entry["symbols"] = {"kind": "elf_debug", "sha256": ssha, "url": f"{base_url}/rust_eddsa_helper-{triple}.so.debug.zip"}
+            entries[triple] = entry
+          os.makedirs("dist/metadata", exist_ok=True)
+          with open("dist/metadata/manifest.json","w",encoding="utf-8") as f:
+            json.dump(entries, f, indent=2, sort_keys=True); f.write("\n")
+          with open("dist/metadata/source_fingerprint.txt","w",encoding="utf-8") as f:
+            f.write(fp + "\n")
+          print("wrote dist/metadata/manifest.json and source_fingerprint.txt")
+          PY
+      - name: Upload metadata artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuild-metadata
+          path: dist/metadata/**
+          if-no-files-found: error

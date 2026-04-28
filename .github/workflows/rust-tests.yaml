@@ -1,0 +1,29 @@
+name: rust-tests
+
+on:
+  push:
+    paths:
+      - '**'
+      - '.github/workflows/rust-tests.yaml'
+  pull_request:
+    paths:
+      - '**'
+      - '.github/workflows/rust-tests.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Run Rust tests
+        run: cargo test
