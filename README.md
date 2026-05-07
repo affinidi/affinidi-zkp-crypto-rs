@@ -47,10 +47,8 @@ The library is built using various formats to suit different deployment scenario
 
 The artifacts are produced in the following locations based on the build profile:
 
-- **macOS:** `librust_eddsa_helper.dylib`
-- **Linux:** `librust_eddsa_helper.so`
-- **iOS:** `librust_eddsa_helper.a`
-- **Android:** `librust_eddsa_helper.so`
+- **macOS / iOS / iOS Simulator:** `librust_eddsa_helper.dylib`
+- **Android / Linux:** `librust_eddsa_helper.so`
 
 ## Development & Prerequisites
 
