@@ -1,6 +1,6 @@
-# affinidi-zkp-crypto-rs
+# affinidi-zkp-crypto
 
-`affinidi-zkp-crypto-rs` is a standalone, high-performance Rust cryptographic library designed for zero-knowledge credential and proof workflows. It serves as the foundational cryptographic engine, providing core primitives for signing, verification, and hashing across multiple platforms.
+`affinidi-zkp-crypto` is a standalone, high-performance Rust cryptographic library designed for zero-knowledge credential and proof workflows. It serves as the foundational cryptographic engine, providing core primitives for signing, verification, and hashing across multiple platforms.
 
 The library is engineered for seamless integration into various environments, including native Rust services (desktop/server) and mobile runtimes (iOS/Android) via Foreign Function Interface (FFI).
 

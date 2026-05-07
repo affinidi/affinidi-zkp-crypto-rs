@@ -122,12 +122,12 @@ jobs:
             x86_64-linux-android \
             i686-linux-android
           EOF
-          docker build -f android-prebuild.Dockerfile -t affinidi-zkp-crypto-rs-android-prebuild .
+          docker build -f android-prebuild.Dockerfile -t affinidi-zkp-crypto-android-prebuild .
           docker run --rm \
             -e ANDROID_API_LEVEL=24 \
             -v "$PWD:/work" \
             -w /work \
-            affinidi-zkp-crypto-rs-android-prebuild \
+            affinidi-zkp-crypto-android-prebuild \
             bash -c '
               set -euo pipefail
               NDK="$ANDROID_NDK_ROOT"

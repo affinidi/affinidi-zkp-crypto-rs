@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "affinidi-zkp-crypto-rs"
+name = "affinidi-zkp-crypto"
 version = "0.1.0"
 dependencies = [
  "ark-bn254",
