@@ -2,7 +2,7 @@
 name = "affinidi-zkp-crypto"
 version = "0.1.0"
 edition = "2021"
-description = "A Rust library which provides Circom ecosystem, compatible with BabyJubJub EdDSA sign/verify primitives and Poseidon hashing with exports, used for mobile integrations"
+description = "A Rust library which provides Circom ecosystem, compatible with BabyJubJub EdDSA sign/verify primitives and Poseidon hashing with exports, used for mobile and desktop integrations"
 license = "Apache-2.0"
 
 [lib]

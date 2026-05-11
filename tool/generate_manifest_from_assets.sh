@@ -55,7 +55,7 @@ for triple in sorted(os.listdir(assets_root)):
         continue
 
     lib_file = None
-    for name in ("librust_eddsa_helper.dylib", "librust_eddsa_helper.so"):
+    for name in ("librust_eddsa_helper.dylib", "librust_eddsa_helper.so", "rust_eddsa_helper.dll"):
         candidate = os.path.join(triple_dir, name)
         if os.path.isfile(candidate):
             lib_file = candidate
@@ -68,7 +68,12 @@ for triple in sorted(os.listdir(assets_root)):
 
     entry = {"sha256": sha}
     if base_url:
-        ext = "dylib" if lib_file.endswith(".dylib") else "so"
+        if lib_file.endswith(".dylib"):
+            ext = "dylib"
+        elif lib_file.endswith(".dll"):
+            ext = "dll"
+        else:
+            ext = "so"
         asset_name = f"rust_eddsa_helper-{triple}.{ext}"
         entry["url"] = f"{base_url.rstrip('/')}/{asset_name}"
 

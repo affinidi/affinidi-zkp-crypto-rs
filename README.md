@@ -2,7 +2,7 @@
 
 `affinidi-zkp-crypto` is a standalone, high-performance Rust cryptographic library designed for zero-knowledge credential and proof workflows. It serves as the foundational cryptographic engine, providing core primitives for signing, verification, and hashing across multiple platforms.
 
-The library is engineered for seamless integration into various environments, including native Rust services (desktop/server) and mobile runtimes (iOS/Android) via Foreign Function Interface (FFI).
+The library is engineered for seamless integration into various environments, including native Rust services and desktop apps (macOS, Linux, Windows) and mobile runtimes (iOS, Android) via Foreign Function Interface (FFI).
 
 > **SECURITY WARNING:**
 > This library handles sensitive cryptographic operations. All usage requires developers to adhere to best practices regarding key management, storage, and secure memory handling. The library's security depends entirely on the secure integration and usage context of the application.
@@ -33,7 +33,7 @@ The library provides three interlocking, critical capabilities:
 1. **Hashing:** **Poseidon hashing** is supported over both **BN254 field elements** and raw **bit inputs**, ensuring consistent, circuit-friendly commitment generation.
 2. **Signatures:** **EdDSA** signing and verification are implemented using the **BabyJubJub elliptic curve**. This combination guarantees the highest level of cryptographic robustness for digital identity claims.
 3. **Multi-Platform Export:** The core logic is compiled to artifacts suitable for consumption across multiple runtime environments:
-    *   Rust Services (`cdylib`)
+    *   Rust Services / Desktop (`cdylib`): macOS, Linux (x64, arm64), Windows (x64)
     *   iOS (`staticlib` with exported C symbols)
     *   Android (`staticlib` with exported C symbols)
 
@@ -48,7 +48,8 @@ The library is built using various formats to suit different deployment scenario
 The artifacts are produced in the following locations based on the build profile:
 
 - **macOS / iOS / iOS Simulator:** `librust_eddsa_helper.dylib`
-- **Android / Linux:** `librust_eddsa_helper.so`
+- **Linux (x64, arm64) / Android:** `librust_eddsa_helper.so`
+- **Windows (x64):** `rust_eddsa_helper.dll`
 
 ## Development & Prerequisites
 
@@ -73,6 +74,12 @@ For Android builds, the NDK toolchain is required:
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 ```
 
+For Linux desktop cross-compilation and Windows (x64), use the Docker-based build script (requires Docker):
+```bash
+bash tool/build_desktop_prebuilds_docker.sh
+```
+This builds `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and `x86_64-pc-windows-gnu` inside a container — no local cross-toolchain needed.
+
 ### Build Commands
 
 ```bash
@@ -88,13 +95,20 @@ cargo build --release --target aarch64-linux-android
 cargo build --release --target armv7-linux-androideabi
 cargo build --release --target i686-linux-android
 cargo build --release --target x86_64-linux-android
+
+# Linux desktop (x64 native)
+cargo build --release --target x86_64-unknown-linux-gnu
+# Linux desktop (arm64 cross, requires aarch64-linux-gnu-gcc + libc6-dev-arm64-cross)
+cargo build --release --target aarch64-unknown-linux-gnu
+# Windows x64 (cross, requires gcc-mingw-w64-x86-64)
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
 ## Installation
 
 *Since this library is a core, native component, installation typically involves linking the pre-compiled artifact rather than a standard package manager command.*
 
-1. **Download Artifacts:** Obtain the necessary `librust_eddsa_helper.[so|a|dylib]` file corresponding to your target platform (Android, iOS, Linux).
+1. **Download Artifacts:** Obtain the necessary `librust_eddsa_helper.[so|a|dylib]` or `rust_eddsa_helper.dll` file corresponding to your target platform (macOS, iOS, Android, Linux, Windows).
 2. **Integration:** Link the downloaded artifact into your target project (e.g., using an Xcode Framework or JNI library dependency).
 
 ## Usage

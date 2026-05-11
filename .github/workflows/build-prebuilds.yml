@@ -174,11 +174,66 @@ jobs:
             dist/release-assets/**
           if-no-files-found: error
 
+  desktop:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux and Windows slices in Docker
+        run: |
+          cat > desktop-prebuild.Dockerfile <<'EOF'
+          FROM rust:1.85-bookworm
+          RUN apt-get update \
+            && apt-get install -y --no-install-recommends zip gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64 \
+            && rm -rf /var/lib/apt/lists/*
+          RUN rustup target add \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-gnu
+          EOF
+          docker build -f desktop-prebuild.Dockerfile -t affinidi-zkp-crypto-desktop-prebuild .
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            affinidi-zkp-crypto-desktop-prebuild \
+            bash -c '
+              set -euo pipefail
+              export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
+              export CARGO_PROFILE_RELEASE_STRIP=none
+              export CARGO_PROFILE_RELEASE_LTO=thin
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+              export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+              mkdir -p dist/prebuilds dist/release-assets
+              for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+                cargo build --release --target "$triple"
+                rel="target/$triple/release"
+                mkdir -p "dist/prebuilds/$triple"
+                cp "$rel/librust_eddsa_helper.so" "dist/prebuilds/$triple/librust_eddsa_helper.so"
+                cp "$rel/librust_eddsa_helper.so" "dist/release-assets/rust_eddsa_helper-${triple}.so"
+              done
+              cargo build --release --target x86_64-pc-windows-gnu
+              triple=x86_64-pc-windows-gnu
+              rel="target/$triple/release"
+              mkdir -p "dist/prebuilds/$triple"
+              cp "$rel/rust_eddsa_helper.dll" "dist/prebuilds/$triple/rust_eddsa_helper.dll"
+              cp "$rel/rust_eddsa_helper.dll" "dist/release-assets/rust_eddsa_helper-${triple}.dll"
+            '
+
+      - name: Upload Desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-desktop
+          path: |
+            dist/prebuilds/**
+            dist/release-assets/**
+          if-no-files-found: error
+
   publish-release:
     needs:
       - prepare
       - apple
       - android
+      - desktop
     runs-on: ubuntu-24.04
     env:
       SOURCE_FINGERPRINT: ${{ needs.prepare.outputs.source_fingerprint }}
@@ -195,10 +250,15 @@ jobs:
         with:
           name: prebuilds-android
           path: dist/android
+      - name: Download Desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-desktop
+          path: dist/desktop
       - name: Normalize prebuild directory
         run: |
           mkdir -p dist/prebuilds dist/release-assets
-          find dist/apple dist/android -type f -name 'librust_eddsa_helper.*' | while read -r f; do
+          find dist/apple dist/android dist/desktop -type f \( -name 'librust_eddsa_helper.*' -o -name 'rust_eddsa_helper.dll' \) | while read -r f; do
             triple="$(basename "$(dirname "$f")")"
             name="$(basename "$f")"
             ext="${name##*.}"
@@ -206,7 +266,7 @@ jobs:
             cp "$f" "dist/prebuilds/$triple/$name"
             cp "$f" "dist/release-assets/rust_eddsa_helper-${triple}.${ext}"
           done
-          find dist/apple dist/android -type f \( -name 'rust_eddsa_helper-*.dSYM.zip' -o -name 'rust_eddsa_helper-*.so.debug.zip' \) | while read -r f; do
+          find dist/apple dist/android dist/desktop -type f \( -name 'rust_eddsa_helper-*.dSYM.zip' -o -name 'rust_eddsa_helper-*.so.debug.zip' \) | while read -r f; do
             triple="$(basename "$(dirname "$f")")"
             b="$(basename "$f")"
             mkdir -p "dist/prebuilds/$triple"
@@ -235,7 +295,7 @@ jobs:
             if not os.path.isdir(td):
               continue
             lib = None
-            for name in ("librust_eddsa_helper.dylib", "librust_eddsa_helper.so"):
+            for name in ("librust_eddsa_helper.dylib", "librust_eddsa_helper.so", "rust_eddsa_helper.dll"):
               p = os.path.join(td, name)
               if os.path.isfile(p):
                 lib = p
@@ -244,7 +304,12 @@ jobs:
               continue
             with open(lib, "rb") as f:
               sha = hashlib.sha256(f.read()).hexdigest()
-            ext = "dylib" if lib.endswith(".dylib") else "so"
+            if lib.endswith(".dylib"):
+              ext = "dylib"
+            elif lib.endswith(".dll"):
+              ext = "dll"
+            else:
+              ext = "so"
             entry = {"sha256": sha, "url": f"{base_url}/rust_eddsa_helper-{triple}.{ext}"}
             dsym = os.path.join(td, f"rust_eddsa_helper-{triple}.dSYM.zip")
             dbg = os.path.join(td, f"rust_eddsa_helper-{triple}.so.debug.zip")

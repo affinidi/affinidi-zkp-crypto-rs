@@ -15,7 +15,8 @@ CRATE="$ROOT"
 
 lib_name_for_target() {
   case "$1" in
-    *linux-android*) echo "librust_eddsa_helper.so" ;;
+    *linux-android* | *unknown-linux*) echo "librust_eddsa_helper.so" ;;
+    *windows*) echo "rust_eddsa_helper.dll" ;;
     *) echo "librust_eddsa_helper.dylib" ;;
   esac
 }
@@ -189,8 +190,11 @@ export_for_triple() {
     *linux-android*)
       apply_android_env "$triple"
       ;;
-    *)
+    *apple*)
       apply_apple_env "$triple" || true
+      ;;
+    *)
+      # Linux desktop and Windows: no extra env needed when running natively inside Docker.
       ;;
   esac
 }
@@ -228,6 +232,7 @@ if [[ "${#@}" -eq 0 ]]; then
   echo "  $0 aarch64-apple-darwin"
   echo "  $0 aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios"
   echo "  ANDROID_NDK_ROOT=... $0 aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android"
+  echo "  (Linux/Windows desktop: use tool/build_desktop_prebuilds_docker.sh)"
   exit 1
 fi
 

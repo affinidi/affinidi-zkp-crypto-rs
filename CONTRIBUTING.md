@@ -21,7 +21,7 @@ rustc --version
 cargo --version
 ```
 
-If you are contributing to mobile build support, install cross-compilation targets.
+If you are contributing to mobile or desktop build support, install cross-compilation targets.
 
 iOS targets:
 
@@ -33,6 +33,12 @@ Android targets:
 
 ```bash
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+```
+
+Linux desktop and Windows targets (via Docker — no local toolchain required):
+
+```bash
+bash tool/build_desktop_prebuilds_docker.sh
 ```
 
 ### Build
